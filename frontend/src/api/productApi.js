@@ -29,8 +29,8 @@ export const fetchProducts = async (params = {}, signal) => {
   if (params.minRating !== undefined && params.minRating > 0) {
     queryParams.append('minRating', params.minRating);
   }
-  if (params.sort) {
-    queryParams.append('sort', params.sort);
+  if (params.sortBy || params.sort) {
+    queryParams.append('sortBy', params.sortBy || params.sort);
   }
   if (params.page) {
     queryParams.append('page', params.page);

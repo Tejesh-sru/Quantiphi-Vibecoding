@@ -74,9 +74,10 @@ export default function App() {
         signal
       );
 
-      if (response && response.data) {
-        setProducts(response.data);
-        setTotalCount(response.total ?? response.data.length);
+      if (response && (response.products || response.data)) {
+        const productList = response.products || response.data;
+        setProducts(productList);
+        setTotalCount(response.count ?? response.total ?? productList.length);
       }
     } catch (err) {
       if (err.name === 'CanceledError' || signal.aborted) {
