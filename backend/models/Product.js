@@ -62,7 +62,7 @@ const productSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: false, // Using explicit createdAt as requested
+    timestamps: false,
     toJSON: { virtuals: true },
     toObject: { virtuals: true }
   }
@@ -73,10 +73,18 @@ productSchema.virtual('imageUrl').get(function () {
   return this.image;
 });
 
-// Compound indexes for optimal multi-filter query execution performance
+// Compound & Specific Indexes for high query performance:
+// 1. Multi-filter optimization (Category + Price + Rating)
 productSchema.index({ category: 1, price: 1, rating: -1 });
+
+// 2. Sorting optimization by price and rating
 productSchema.index({ price: 1 });
 productSchema.index({ rating: -1 });
+
+// 3. Search optimization: Text index for keyword relevance & B-Tree prefix index for prefix queries
+productSchema.index({ name: 'text', description: 'text' });
+productSchema.index({ name: 1 });
+productSchema.index({ name: 1, category: 1, price: 1 });
 
 const Product = mongoose.model('Product', productSchema);
 

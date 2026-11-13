@@ -4,15 +4,40 @@ import { ALLOWED_CATEGORIES } from '../models/Product.js';
 export const VALID_SORT_OPTIONS = ['price_asc', 'price_desc', 'rating_desc'];
 
 /**
- * Validates and sanitizes incoming product search query parameters.
- * Rejects negative prices, inverted price ranges, invalid ratings, and unsupported sort options.
+ * Validates and sanitizes incoming product search, filtering, and pagination query parameters.
+ * Rejects negative prices, inverted price ranges, invalid ratings, unsupported sort options,
+ * and malformed pagination bounds.
  */
 export const validateProductQuery = (req, res, next) => {
-  const { categories, minPrice, maxPrice, minRating, sortBy, sort } = req.query;
+  const {
+    search,
+    categories,
+    minPrice,
+    maxPrice,
+    minRating,
+    sortBy,
+    sort,
+    page,
+    limit,
+  } = req.query;
 
   const validated = {};
 
-  // 1. Validate 'categories'
+  // 1. Validate 'search' (Product search by name)
+  if (search !== undefined && search !== null && search !== '') {
+    if (typeof search !== 'string') {
+      return next(new AppError('Search parameter must be a string', 400));
+    }
+    const trimmed = search.trim();
+    if (trimmed.length > 100) {
+      return next(new AppError('Search query cannot exceed 100 characters', 400));
+    }
+    if (trimmed.length > 0) {
+      validated.search = trimmed;
+    }
+  }
+
+  // 2. Validate 'categories'
   if (categories !== undefined && categories !== null && categories !== '') {
     if (typeof categories !== 'string') {
       return next(new AppError('Query parameter "categories" must be a comma-separated string', 400));
@@ -24,7 +49,6 @@ export const validateProductQuery = (req, res, next) => {
       .filter(Boolean);
 
     if (categoryList.length > 0) {
-      // Ensure all requested categories exist in allowed categories list
       const invalidCategories = categoryList.filter((c) => !ALLOWED_CATEGORIES.includes(c));
       if (invalidCategories.length > 0) {
         return next(
@@ -38,7 +62,7 @@ export const validateProductQuery = (req, res, next) => {
     }
   }
 
-  // 2. Validate 'minPrice'
+  // 3. Validate 'minPrice'
   if (minPrice !== undefined && minPrice !== '') {
     const parsedMinPrice = Number(minPrice);
     if (!Number.isFinite(parsedMinPrice) || isNaN(parsedMinPrice)) {
@@ -50,7 +74,7 @@ export const validateProductQuery = (req, res, next) => {
     validated.minPrice = parsedMinPrice;
   }
 
-  // 3. Validate 'maxPrice'
+  // 4. Validate 'maxPrice'
   if (maxPrice !== undefined && maxPrice !== '') {
     const parsedMaxPrice = Number(maxPrice);
     if (!Number.isFinite(parsedMaxPrice) || isNaN(parsedMaxPrice)) {
@@ -62,7 +86,7 @@ export const validateProductQuery = (req, res, next) => {
     validated.maxPrice = parsedMaxPrice;
   }
 
-  // 4. Invariant: Minimum price must not exceed maximum price
+  // 5. Invariant: Minimum price must not exceed maximum price
   if (validated.minPrice !== undefined && validated.maxPrice !== undefined) {
     if (validated.minPrice > validated.maxPrice) {
       return next(
@@ -71,7 +95,7 @@ export const validateProductQuery = (req, res, next) => {
     }
   }
 
-  // 5. Validate 'minRating'
+  // 6. Validate 'minRating'
   if (minRating !== undefined && minRating !== '') {
     const parsedRating = Number(minRating);
     if (!Number.isFinite(parsedRating) || isNaN(parsedRating)) {
@@ -83,7 +107,7 @@ export const validateProductQuery = (req, res, next) => {
     validated.minRating = parsedRating;
   }
 
-  // 6. Validate 'sortBy' (support both 'sortBy' and 'sort' parameters)
+  // 7. Validate 'sortBy'
   const sortParam = sortBy || sort;
   if (sortParam !== undefined && sortParam !== '') {
     if (!VALID_SORT_OPTIONS.includes(sortParam)) {
@@ -96,7 +120,29 @@ export const validateProductQuery = (req, res, next) => {
     }
     validated.sortBy = sortParam;
   } else {
-    validated.sortBy = 'rating_desc'; // Default sorting strategy
+    validated.sortBy = 'rating_desc'; // Default sorting
+  }
+
+  // 8. Validate 'page' (Server-side pagination)
+  if (page !== undefined && page !== '') {
+    const parsedPage = Number(page);
+    if (!Number.isInteger(parsedPage) || parsedPage < 1) {
+      return next(new AppError('Page parameter must be a positive integer greater than or equal to 1', 400));
+    }
+    validated.page = parsedPage;
+  } else {
+    validated.page = 1;
+  }
+
+  // 9. Validate 'limit' (Server-side pagination limit)
+  if (limit !== undefined && limit !== '') {
+    const parsedLimit = Number(limit);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 50) {
+      return next(new AppError('Limit parameter must be an integer between 1 and 50', 400));
+    }
+    validated.limit = parsedLimit;
+  } else {
+    validated.limit = 8; // Default 8 items per page
   }
 
   // Store sanitized values for controller use

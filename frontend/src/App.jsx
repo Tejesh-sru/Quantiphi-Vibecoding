@@ -2,29 +2,38 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Navbar from './components/Navbar';
 import FilterSidebar from './components/Filters/FilterSidebar';
 import SortDropdown from './components/Filters/SortDropdown';
+import SearchBar from './components/Common/SearchBar';
+import Pagination from './components/Common/Pagination';
 import ProductGrid from './components/Products/ProductGrid';
 import { useDebounce } from './hooks/useDebounce';
 import { fetchProducts, fetchProductMeta } from './api/productApi';
 import './styles/App.css';
 
 const DEFAULT_BOUNDS = { min: 0, max: 2000 };
+const PAGE_LIMIT = 8; // 8 items per page for clean pagination with 35 items
 
 export default function App() {
   // Catalog Bounds (Dynamically retrieved from backend /api/products/meta)
   const [priceBounds, setPriceBounds] = useState(DEFAULT_BOUNDS);
 
-  // Filter States
+  // Search & Filter States
+  const [searchTerm, setSearchTerm] = useState('');
   const [categories, setCategories] = useState([]);
   const [priceRange, setPriceRange] = useState(DEFAULT_BOUNDS);
   const [minRating, setMinRating] = useState(0);
   const [sortBy, setSortBy] = useState('rating_desc');
 
-  // Debounced price range (300ms) to avoid spamming the backend during slider drags
+  // Server-side Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Debounced inputs (300ms) to prevent excessive backend queries during rapid user typing/sliding
   const debouncedPriceRange = useDebounce(priceRange, 300);
+  const debouncedSearch = useDebounce(searchTerm, 300);
 
   // Products and Request State
   const [products, setProducts] = useState([]);
-  const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -48,7 +57,7 @@ export default function App() {
         }
       } catch (err) {
         if (err.name !== 'CanceledError' && !controller.signal.aborted) {
-          console.warn('Could not fetch catalog metadata (backend may still be starting):', err.message);
+          console.warn('Could not fetch catalog metadata:', err.message);
         }
       }
     }
@@ -57,7 +66,12 @@ export default function App() {
     return () => controller.abort();
   }, []);
 
-  // 2. Fetch Filtered Products from Backend whenever filters change
+  // 2. Automatically reset to page 1 whenever any filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, categories, debouncedPriceRange, minRating, sortBy]);
+
+  // 3. Fetch Filtered, Sorted, and Paginated Products from Backend
   const loadFilteredProducts = useCallback(async (signal) => {
     setIsLoading(true);
     setError(null);
@@ -65,11 +79,14 @@ export default function App() {
     try {
       const response = await fetchProducts(
         {
+          search: debouncedSearch,
           categories,
           minPrice: debouncedPriceRange.min,
           maxPrice: debouncedPriceRange.max,
           minRating,
-          sort: sortBy,
+          sortBy,
+          page: currentPage,
+          limit: PAGE_LIMIT,
         },
         signal
       );
@@ -77,11 +94,11 @@ export default function App() {
       if (response && (response.products || response.data)) {
         const productList = response.products || response.data;
         setProducts(productList);
-        setTotalCount(response.count ?? response.total ?? productList.length);
+        setTotalCount(response.total ?? productList.length);
+        setTotalPages(response.totalPages ?? 1);
       }
     } catch (err) {
       if (err.name === 'CanceledError' || signal.aborted) {
-        // Ignored: request canceled by subsequent filter change
         return;
       }
       console.error('Failed to load products:', err);
@@ -94,7 +111,7 @@ export default function App() {
         setIsLoading(false);
       }
     }
-  }, [categories, debouncedPriceRange, minRating, sortBy]);
+  }, [debouncedSearch, categories, debouncedPriceRange, minRating, sortBy, currentPage]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -105,12 +122,14 @@ export default function App() {
     };
   }, [loadFilteredProducts]);
 
-  // Reset all filters to default state
+  // 4. Reset all filters and search back to pristine initial state
   const handleResetFilters = useCallback(() => {
+    setSearchTerm('');
     setCategories([]);
     setPriceRange(priceBounds);
     setMinRating(0);
     setSortBy('rating_desc');
+    setCurrentPage(1);
   }, [priceBounds]);
 
   // Remove individual category chip
@@ -118,27 +137,44 @@ export default function App() {
     setCategories((prev) => prev.filter((c) => c !== catToRemove));
   };
 
-  // Check if any filters are active compared to base defaults
+  // 5. Active Filter Chips computation
   const activeChips = useMemo(() => {
     const chips = [];
+
+    // Search query chip
+    if (searchTerm.trim()) {
+      chips.push({
+        id: 'search',
+        type: 'search',
+        label: `Search: "${searchTerm.trim()}"`,
+        onRemove: () => setSearchTerm(''),
+      });
+    }
+
+    // Category chips
     categories.forEach((c) => {
       chips.push({
+        id: `cat-${c}`,
         type: 'category',
         label: `Category: ${c}`,
         onRemove: () => handleRemoveCategory(c),
       });
     });
 
+    // Price range chip
     if (priceRange.min > priceBounds.min || priceRange.max < priceBounds.max) {
       chips.push({
+        id: 'price',
         type: 'price',
         label: `$${priceRange.min} – $${priceRange.max}`,
         onRemove: () => setPriceRange(priceBounds),
       });
     }
 
+    // Minimum rating chip
     if (minRating > 0) {
       chips.push({
+        id: 'rating',
         type: 'rating',
         label: `${minRating}★ & above`,
         onRemove: () => setMinRating(0),
@@ -146,7 +182,7 @@ export default function App() {
     }
 
     return chips;
-  }, [categories, priceRange, priceBounds, minRating]);
+  }, [searchTerm, categories, priceRange, priceBounds, minRating]);
 
   return (
     <div className="app-root">
@@ -175,32 +211,47 @@ export default function App() {
             onPriceChange={setPriceRange}
             rating={minRating}
             onRatingChange={setMinRating}
+            searchTerm={searchTerm}
             onResetAll={handleResetFilters}
             isOpen={isMobileSidebarOpen}
           />
 
           {/* Right: Content Area */}
           <section className="content-area">
-            {/* Top Bar with Results Count & Sort Dropdown */}
+            {/* Top Bar with SearchBar, Results Count, and Sort Dropdown */}
             <div className="content-top-bar">
-              <div className="results-info">
-                <span className="results-count">{isLoading ? '...' : totalCount}</span>
-                <span className="results-label">
-                  {totalCount === 1 ? 'Product found' : 'Products found'}
-                </span>
-              </div>
+              {/* Product search input */}
+              <SearchBar
+                value={searchTerm}
+                onChange={setSearchTerm}
+                onClear={() => setSearchTerm('')}
+              />
 
-              <SortDropdown currentSort={sortBy} onChange={setSortBy} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                <div className="results-info">
+                  <span className="results-count">{isLoading ? '...' : totalCount}</span>
+                  <span className="results-label">
+                    {totalCount === 1 ? 'Product found' : 'Products found'}
+                  </span>
+                  {totalPages > 1 && (
+                    <span className="results-pages-badge">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                  )}
+                </div>
+
+                <SortDropdown currentSort={sortBy} onChange={setSortBy} />
+              </div>
             </div>
 
-            {/* Active Filter Chips */}
+            {/* Active Filter Chips with Individual Removal and Clear All */}
             {activeChips.length > 0 && (
               <div className="active-chips-row" aria-label="Active filters">
                 <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)', fontWeight: 600 }}>
-                  Active:
+                  Active Filters:
                 </span>
-                {activeChips.map((chip, index) => (
-                  <span key={index} className="filter-chip">
+                {activeChips.map((chip) => (
+                  <span key={chip.id} className="filter-chip">
                     {chip.label}
                     <button
                       type="button"
@@ -212,6 +263,13 @@ export default function App() {
                     </button>
                   </span>
                 ))}
+                <button
+                  type="button"
+                  className="btn-clear-all-chips"
+                  onClick={handleResetFilters}
+                >
+                  Clear All
+                </button>
               </div>
             )}
 
@@ -227,16 +285,30 @@ export default function App() {
                   fontSize: '0.9rem',
                 }}
               >
-                <strong>Backend Notice:</strong> {error}
+                <strong>Notice:</strong> {error}
               </div>
             )}
 
-            {/* Product Grid or Empty State */}
+            {/* Product Grid or Empty State with Loading Skeletons */}
             <ProductGrid
               products={products}
               isLoading={isLoading}
               onResetFilters={handleResetFilters}
             />
+
+            {/* Server-Side Pagination Controls */}
+            {!isLoading && totalPages > 1 && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalCount={totalCount}
+                limit={PAGE_LIMIT}
+                onPageChange={(newPage) => {
+                  setCurrentPage(newPage);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+              />
+            )}
           </section>
         </div>
       </main>

@@ -16,7 +16,6 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 describe('E-Commerce Multi-Filter REST API Test Suite', () => {
   before(async () => {
-    // Ensure database connection and seeded state
     if (mongoose.connection.readyState === 0) {
       await connectDB();
     }
@@ -27,7 +26,6 @@ describe('E-Commerce Multi-Filter REST API Test Suite', () => {
   });
 
   after(async () => {
-    // Gracefully close database connection after test run completes
     await mongoose.connection.close();
   });
 
@@ -64,15 +62,17 @@ describe('E-Commerce Multi-Filter REST API Test Suite', () => {
     });
   });
 
-  // 4. Default Products Query
-  describe('GET /api/products (Default state)', () => {
-    it('should return all products with success and count', async () => {
+  // 4. Default Products Query with Pagination Metadata
+  describe('GET /api/products (Default state & Pagination)', () => {
+    it('should return default paginated products with total and totalPages', async () => {
       const res = await request(app).get('/api/products');
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);
-      assert.ok(res.body.count > 0);
-      assert.ok(Array.isArray(res.body.products));
-      assert.equal(res.body.products.length, res.body.count);
+      assert.ok(res.body.total >= 35);
+      assert.equal(res.body.page, 1);
+      assert.equal(res.body.limit, 8);
+      assert.equal(res.body.totalPages, Math.ceil(res.body.total / 8));
+      assert.equal(res.body.products.length, Math.min(8, res.body.total));
 
       // Verify product schema contracts
       const sample = res.body.products[0];
@@ -83,35 +83,80 @@ describe('E-Commerce Multi-Filter REST API Test Suite', () => {
       assert.ok(sample.rating !== undefined);
       assert.ok(sample.image);
     });
+
+    it('should paginate to page 2 and return distinct products from page 1', async () => {
+      const page1Res = await request(app).get('/api/products?page=1&limit=8');
+      const page2Res = await request(app).get('/api/products?page=2&limit=8');
+
+      assert.equal(page1Res.status, 200);
+      assert.equal(page2Res.status, 200);
+      assert.equal(page2Res.body.page, 2);
+
+      const page1Ids = page1Res.body.products.map((p) => p._id);
+      const page2Ids = page2Res.body.products.map((p) => p._id);
+
+      // Verify no overlap between page 1 and page 2
+      page2Ids.forEach((id) => {
+        assert.ok(!page1Ids.includes(id), `Page 2 item ${id} should not appear on page 1`);
+      });
+    });
   });
 
-  // 5. Category Filtering
+  // 5. Backend Search by Product Name
+  describe('Backend Product Search by Name', () => {
+    it('should return products matching name keyword (case-insensitive "sony")', async () => {
+      const res = await request(app).get('/api/products?search=sony');
+      assert.equal(res.status, 200);
+      assert.ok(res.body.total > 0);
+      res.body.products.forEach((p) => {
+        assert.match(p.name, /sony/i);
+      });
+    });
+
+    it('should perform partial word matching ("headphone")', async () => {
+      const res = await request(app).get('/api/products?search=headphone');
+      assert.equal(res.status, 200);
+      assert.ok(res.body.total > 0);
+      res.body.products.forEach((p) => {
+        assert.match(p.name, /headphone/i);
+      });
+    });
+
+    it('should safely escape regex special characters in search', async () => {
+      const res = await request(app).get('/api/products?search=Sony%20(WH');
+      assert.equal(res.status, 200);
+      // Ensures server does not crash with regex syntax error
+      assert.equal(res.body.success, true);
+    });
+  });
+
+  // 6. Category Filtering
   describe('Category Filtering', () => {
     it('should filter by a single category (Electronics)', async () => {
-      const res = await request(app).get('/api/products?categories=Electronics');
+      const res = await request(app).get('/api/products?categories=Electronics&limit=50');
       assert.equal(res.status, 200);
-      assert.ok(res.body.count > 0);
+      assert.ok(res.body.total > 0);
       res.body.products.forEach((p) => {
         assert.equal(p.category, 'Electronics');
       });
     });
 
     it('should filter by multiple categories using $in logic (Footwear, Apparel)', async () => {
-      const res = await request(app).get('/api/products?categories=Footwear,Apparel');
+      const res = await request(app).get('/api/products?categories=Footwear,Apparel&limit=50');
       assert.equal(res.status, 200);
-      assert.ok(res.body.count > 0);
+      assert.ok(res.body.total > 0);
       res.body.products.forEach((p) => {
         assert.ok(['Footwear', 'Apparel'].includes(p.category));
       });
     });
   });
 
-  // 6. Price Range Filtering
+  // 7. Price Range Filtering
   describe('Price Range Filtering', () => {
     it('should return products within minPrice and maxPrice inclusive', async () => {
       const min = 50;
       const max = 200;
-      const res = await request(app).get(`/api/products?minPrice=${min}&maxPrice=${max}`);
+      const res = await request(app).get(`/api/products?minPrice=${min}&maxPrice=${max}&limit=50`);
       assert.equal(res.status, 200);
       res.body.products.forEach((p) => {
         assert.ok(p.price >= min, `Product price ${p.price} should be >= ${min}`);
@@ -120,64 +165,77 @@ describe('E-Commerce Multi-Filter REST API Test Suite', () => {
     });
   });
 
-  // 7. Star Rating Filtering
+  // 8. Customer Star Rating Filtering
   describe('Customer Star Rating Filtering', () => {
     it('should return products with rating >= minRating', async () => {
       const minRating = 4;
-      const res = await request(app).get(`/api/products?minRating=${minRating}`);
+      const res = await request(app).get(`/api/products?minRating=${minRating}&limit=50`);
       assert.equal(res.status, 200);
-      assert.ok(res.body.count > 0);
+      assert.ok(res.body.total > 0);
       res.body.products.forEach((p) => {
         assert.ok(p.rating >= minRating, `Product rating ${p.rating} should be >= ${minRating}`);
       });
     });
   });
 
-  // 8. Multi-Filter Combination (AND Logic)
-  describe('Combined Multi-Filter (AND Logic)', () => {
-    it('should simultaneously respect Category, Price, and Rating constraints', async () => {
-      const url = '/api/products?categories=Electronics&minPrice=100&maxPrice=500&minRating=4';
+  // 9. Multi-Filter Combination with Search, Sorting, and Pagination
+  describe('Full Processing Order: Search -> Filter -> Sort -> Pagination', () => {
+    it('should execute full chain: search + category + price + rating + sort + pagination', async () => {
+      const url = '/api/products?search=Wireless&categories=Electronics&minPrice=50&maxPrice=500&minRating=4&sortBy=price_asc&page=1&limit=5';
       const res = await request(app).get(url);
       assert.equal(res.status, 200);
-      res.body.products.forEach((p) => {
+      assert.equal(res.body.success, true);
+      assert.ok(res.body.total > 0);
+      assert.equal(res.body.page, 1);
+      assert.ok(res.body.products.length <= 5);
+
+      // Verify every product satisfies all search, filter, and sort criteria
+      const items = res.body.products;
+      items.forEach((p) => {
+        assert.match(p.name, /wireless/i);
         assert.equal(p.category, 'Electronics');
-        assert.ok(p.price >= 100 && p.price <= 500);
+        assert.ok(p.price >= 50 && p.price <= 500);
         assert.ok(p.rating >= 4);
       });
+
+      // Verify price ascending sort
+      for (let i = 0; i < items.length - 1; i++) {
+        assert.ok(items[i].price <= items[i + 1].price);
+      }
     });
   });
 
-  // 9. Sorting Logic (Happens AFTER filtering)
+  // 10. Sorting Strategies
   describe('Sorting Strategies', () => {
     it('should sort products by price ascending (price_asc)', async () => {
-      const res = await request(app).get('/api/products?sortBy=price_asc');
+      const res = await request(app).get('/api/products?sortBy=price_asc&limit=20');
       assert.equal(res.status, 200);
       const items = res.body.products;
       for (let i = 0; i < items.length - 1; i++) {
-        assert.ok(items[i].price <= items[i + 1].price, `Price at ${i} should be <= ${i + 1}`);
+        assert.ok(items[i].price <= items[i + 1].price);
       }
     });
 
     it('should sort products by price descending (price_desc)', async () => {
-      const res = await request(app).get('/api/products?sortBy=price_desc');
+      const res = await request(app).get('/api/products?sortBy=price_desc&limit=20');
       assert.equal(res.status, 200);
       const items = res.body.products;
       for (let i = 0; i < items.length - 1; i++) {
-        assert.ok(items[i].price >= items[i + 1].price, `Price at ${i} should be >= ${i + 1}`);
+        assert.ok(items[i].price >= items[i + 1].price);
       }
     });
 
     it('should sort products by top rated first (rating_desc)', async () => {
-      const res = await request(app).get('/api/products?sortBy=rating_desc');
+      const res = await request(app).get('/api/products?sortBy=rating_desc&limit=20');
       assert.equal(res.status, 200);
       const items = res.body.products;
       for (let i = 0; i < items.length - 1; i++) {
-        assert.ok(items[i].rating >= items[i + 1].rating, `Rating at ${i} should be >= ${i + 1}`);
+        assert.ok(items[i].rating >= items[i + 1].rating);
       }
     });
   });
 
-  // 10. Query Validation & Edge Case Handling
+  // 11. Input Validation & Error Edge Cases
   describe('Input Validation & Error Edge Cases', () => {
     it('should reject negative minPrice with 400 Bad Request', async () => {
       const res = await request(app).get('/api/products?minPrice=-15');
@@ -213,9 +271,23 @@ describe('E-Commerce Multi-Filter REST API Test Suite', () => {
       assert.equal(res.body.success, false);
       assert.match(res.body.message, /Invalid sort option/i);
     });
+
+    it('should reject invalid page parameter (page=0) with 400 Bad Request', async () => {
+      const res = await request(app).get('/api/products?page=0');
+      assert.equal(res.status, 400);
+      assert.equal(res.body.success, false);
+      assert.match(res.body.message, /Page parameter must be a positive integer/i);
+    });
+
+    it('should reject limit exceeding bounds (limit=999) with 400 Bad Request', async () => {
+      const res = await request(app).get('/api/products?limit=999');
+      assert.equal(res.status, 400);
+      assert.equal(res.body.success, false);
+      assert.match(res.body.message, /Limit parameter must be an integer between 1 and 50/i);
+    });
   });
 
-  // 11. Single Product by ID
+  // 12. Single Product by ID
   describe('GET /api/products/:id', () => {
     it('should return single product for a valid ID', async () => {
       const all = await Product.find().limit(1);
@@ -241,7 +313,7 @@ describe('E-Commerce Multi-Filter REST API Test Suite', () => {
     });
   });
 
-  // 12. Fallback 404 Route
+  // 13. Fallback 404 Route
   describe('404 Route Not Found Handling', () => {
     it('should return 404 with structured JSON on unregistered routes', async () => {
       const res = await request(app).get('/api/non-existent-endpoint');

@@ -14,11 +14,13 @@ export default function FilterSidebar({
   onPriceChange,
   rating = 0,
   onRatingChange,
+  searchTerm = '',
   onResetAll,
   isOpen = false,
 }) {
   // Compute how many active filters are applied
   let activeCount = 0;
+  if (searchTerm && searchTerm.trim()) activeCount += 1;
   if (categories.length > 0) activeCount += categories.length;
   if (priceRange.min > priceBounds.min || priceRange.max < priceBounds.max) activeCount += 1;
   if (rating > 0) activeCount += 1;

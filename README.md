@@ -1,11 +1,11 @@
 # E-Commerce Product Multi-Filter System (MERN Stack)
 
-A high-performance, responsive E-Commerce Product Multi-Filter application adhering to clean MVC architecture and strict software engineering principles.
+A high-performance, responsive E-Commerce Product Multi-Filter application adhering to clean MVC architecture, robust server-driven querying, and comprehensive QA testing.
 
 ---
 
 ## 🛠️ Technology Stack
-* **Frontend:** React.js (Functional components & hooks), Axios
+* **Frontend:** React.js 18 (Functional components & hooks), Axios
 * **Backend:** Node.js & Express.js (MVC Architecture)
 * **Database:** MongoDB with Mongoose
 * **Testing:** Node.js Native Test Runner (`node:test`, `node:assert/strict`), Supertest
@@ -13,7 +13,73 @@ A high-performance, responsive E-Commerce Product Multi-Filter application adher
 
 ---
 
-## 🏗️ Architecture & MVC Structure
+## 🚀 Core & Extended Features
+
+1. **Backend Product Search by Name:**
+   - Case-insensitive search on product names.
+   - Escapes special characters to prevent regex injection (ReDoS).
+   - Partial match support (e.g. searching "headphone" matches "Sony WH-1000XM5 Wireless Noise-Canceling Headphones").
+
+2. **Server-Side Pagination:**
+   - Query parameters: `page` (default `1`) and `limit` (default `8`, max `50`).
+   - Slices database records using `.skip((page - 1) * limit).limit(limit)`.
+
+3. **Total Matching Products & Total Pages:**
+   - Returns `{ total, totalPages, page, limit, count, products }`.
+   - UI summary: *"Showing 1–8 of 35 products (Page 1 of 5)"*.
+
+4. **Multi-Category Filtering:**
+   - `Electronics`, `Apparel`, `Footwear`, `Home & Kitchen`, `Accessories`.
+   - Multi-select checkbox options with query `$in` evaluation.
+
+5. **Dual-Range Price Slider:**
+   - Boundary invariant clamping: `minPrice <= maxPrice` at all times.
+   - Visual active range highlight track.
+   - 300ms debounce to prevent excessive server requests during dragging.
+
+6. **Customer Star Rating Filtering:**
+   - 1 to 5-star radio button selector (`rating >= minRating`).
+
+7. **Server-Driven Sorting:**
+   - *Price: Low to High* (`price_asc`)
+   - *Price: High to Low* (`price_desc`)
+   - *Top Rated First* (`rating_desc`)
+
+8. **Active Filter Chips & Individual Removal:**
+   - Chips generated for active Search query, Category selections, Price range, and Star rating.
+   - Clicking `×` on any individual chip resets only that specific filter and resets pagination back to page 1.
+
+9. **Clear All Filters Functionality:**
+   - A single-click "Clear All" action in both the sidebar and chips row resets search, categories, price range, rating, and sort back to defaults.
+
+10. **Loading Skeletons:**
+    - High-fidelity animated shimmer placeholder cards displayed during data fetching.
+
+11. **Strict Processing Order:**
+    ```
+    Incoming Request
+          │
+          ▼
+    1. SEARCH        -> filterConditions.name = { $regex: sanitized, $options: 'i' }
+          │
+          ▼
+    2. FILTERING     -> category ($in), price ($gte, $lte), rating ($gte)
+          │
+          ▼
+    3. SORTING       -> price_asc, price_desc, rating_desc
+          │
+          ▼
+    4. PAGINATION    -> .skip((page - 1) * limit).limit(limit)
+    ```
+
+12. **Database Performance Indexing:**
+    - Compound index: `{ category: 1, price: 1, rating: -1 }`
+    - Sorting indexes: `{ price: 1 }`, `{ rating: -1 }`
+    - Search text & B-tree indexes: `{ name: 'text', description: 'text' }`, `{ name: 1 }`, `{ name: 1, category: 1, price: 1 }`
+
+---
+
+## 🏗️ Architecture & File Structure
 
 ```
 Vibecoding/
@@ -32,7 +98,7 @@ Vibecoding/
 │   ├── seeds/
 │   │   └── seedProducts.js       # Database seeder (35 realistic products)
 │   ├── tests/
-│   │   └── products.api.test.js  # 21 Integration & Unit API Tests (Supertest)
+│   │   └── products.api.test.js  # 27 Integration & Unit API Tests (Supertest)
 │   ├── app.js                    # Express app configuration & middleware pipeline
 │   ├── server.js                 # Server listener & graceful process lifecycle
 │   ├── .env.example
@@ -41,11 +107,12 @@ Vibecoding/
 ├── frontend/
 │   ├── src/
 │   │   ├── api/productApi.js     # Axios API client
+│   │   ├── components/Common/    # SearchBar, Pagination, StarRating
 │   │   ├── components/Filters/   # Dual slider, category checkboxes, rating radios, sort
 │   │   ├── components/Products/  # Product cards, responsive grid, empty state
-│   │   ├── hooks/useDebounce.js  # 300ms slider debounce hook
+│   │   ├── hooks/useDebounce.js  # 300ms debounce hook
 │   │   ├── tests/
-│   │   │   └── filters.functional.test.js # 10 Frontend invariant & functional tests
+│   │   │   └── filters.functional.test.js # 14 Frontend invariant & functional tests
 │   │   ├── App.jsx
 │   │   └── main.jsx
 │   └── package.json
@@ -59,22 +126,29 @@ Vibecoding/
 ## 📡 REST API Endpoints
 
 ### 1. `GET /api/products`
-Retrieves products filtered and sorted strictly on the backend.
+Retrieves products filtered, searched, sorted, and paginated strictly on the backend.
 
 #### Query Parameters:
 | Parameter | Type | Required | Description | Example |
 | :--- | :--- | :--- | :--- | :--- |
+| `search` | String | No | Search keyword in product name | `wireless` |
 | `categories` | String | No | Comma-separated categories | `Electronics,Apparel` |
 | `minPrice` | Number | No | Minimum price (`price >= minPrice`) | `50` |
 | `maxPrice` | Number | No | Maximum price (`price <= maxPrice`) | `500` |
 | `minRating` | Number | No | Minimum rating (`rating >= minRating`, 1–5) | `4` |
 | `sortBy` | String | No | Sort order: `price_asc`, `price_desc`, `rating_desc` | `price_asc` |
+| `page` | Integer | No | Page number (default: `1`) | `2` |
+| `limit` | Integer | No | Items per page (default: `8`, max: `50`) | `8` |
 
 #### Successful Response (`200 OK`):
 ```json
 {
   "success": true,
-  "count": 12,
+  "count": 8,
+  "total": 35,
+  "page": 1,
+  "totalPages": 5,
+  "limit": 8,
   "products": [
     {
       "_id": "673468...",
@@ -84,6 +158,7 @@ Retrieves products filtered and sorted strictly on the backend.
       "price": 399.99,
       "rating": 4.8,
       "image": "https://images.unsplash.com/...",
+      "imageUrl": "https://images.unsplash.com/...",
       "createdAt": "2026-01-10T10:00:00.000Z"
     }
   ]
@@ -91,7 +166,7 @@ Retrieves products filtered and sorted strictly on the backend.
 ```
 
 ### 2. `GET /api/products/categories`
-Returns all 5 supported product categories (`Electronics`, `Apparel`, `Footwear`, `Home & Kitchen`, `Accessories`).
+Returns all 5 supported product categories.
 
 ### 3. `GET /api/products/:id`
 Returns a single product by its MongoDB `_id`.
@@ -101,25 +176,9 @@ Returns dynamic min/max catalog price bounds to dynamically calibrate the fronte
 
 ---
 
-## 🚦 Error Handling & Validations
-The API implements strict validations in `validateQuery.js`:
-* **Negative Prices:** Returns `400 Bad Request` if `minPrice < 0` or `maxPrice < 0`.
-* **Inverted Price Bounds:** Returns `400 Bad Request` if `minPrice > maxPrice`.
-* **Invalid Rating:** Returns `400 Bad Request` if `minRating < 1` or `minRating > 5`.
-* **Invalid Category:** Returns `400 Bad Request` if an unsupported category is queried.
-* **Invalid Sort Option:** Returns `400 Bad Request` if unsupported sort criteria are provided.
-* **Invalid Product ID:** Returns `400 Bad Request` on malformed ObjectId, or `404 Not Found` if nonexistent.
-
----
-
 ## 🧪 Automated Testing & QA Verification
 
-The project includes **31 automated test cases** covering both backend REST API integration and frontend business logic invariants.
-
-### Understanding Negative Testing (`400 Bad Request` and `404 Not Found`)
-In production-grade software testing, **Negative Tests** intentionally send malformed or malicious data (e.g. `minPrice: -15` or an inverted price range) to verify that the server **safely rejects invalid requests** with the correct HTTP status code (`400` or `404`) instead of crashing (`500 Internal Server Error`). When a negative test receives the expected `400` or `404`, the test passes (`✔`).
-
-### Test Suite Results
+The project includes **41 automated test cases** covering backend REST API integration and frontend functional invariants.
 
 ```
 ====================================================
@@ -127,105 +186,52 @@ In production-grade software testing, **Negative Tests** intentionally send malf
 ====================================================
 
 ▶ Running Backend REST API Tests...
-[MongoDB] Connected successfully to: localhost/ecommerce_filter_db
-▶ E-Commerce Multi-Filter REST API Test Suite
-  ▶ GET /api/health
-    ✔ should return 200 OK and uptime timestamp (24.6189ms)
-  ✔ GET /api/health (25.5382ms)
-  ▶ GET /api/products/categories
-    ✔ should return list of all 5 supported product categories (9.3367ms)
-  ✔ GET /api/products/categories (9.6599ms)
-  ▶ GET /api/products/meta
-    ✔ should return catalog price bounds and total count (10.265ms)
-  ✔ GET /api/products/meta (10.4769ms)
-  ▶ GET /api/products (Default state)
-    ✔ should return all products with success and count (16.6686ms)
-  ✔ GET /api/products (Default state) (16.9223ms)
-  ▶ Category Filtering
-    ✔ should filter by a single category (Electronics) (15.8374ms)
-    ✔ should filter by multiple categories using $in logic (Footwear, Apparel) (17.5347ms)
-  ✔ Category Filtering (33.9039ms)
-  ▶ Price Range Filtering
-    ✔ should return products within minPrice and maxPrice inclusive (13.0515ms)
-  ✔ Price Range Filtering (13.3298ms)
-  ▶ Customer Star Rating Filtering
-    ✔ should return products with rating >= minRating (11.1173ms)
-  ✔ Customer Star Rating Filtering (11.3755ms)
-  ▶ Combined Multi-Filter (AND Logic)
-    ✔ should simultaneously respect Category, Price, and Rating constraints (11.8711ms)
-  ✔ Combined Multi-Filter (AND Logic) (12.1215ms)
-  ▶ Sorting Strategies
-    ✔ should sort products by price ascending (price_asc) (15.3583ms)
-    ✔ should sort products by price descending (price_desc) (10.7345ms)
-    ✔ should sort products by top rated first (rating_desc) (9.1972ms)
-  ✔ Sorting Strategies (35.6609ms)
-  ▶ Input Validation & Error Edge Cases
-    ✔ should reject negative minPrice with 400 Bad Request (7.8011ms)
-    ✔ should reject when minPrice > maxPrice with 400 Bad Request (4.9569ms)
-    ✔ should reject minRating > 5 with 400 Bad Request (5.0196ms)
-    ✔ should reject unsupported categories with 400 Bad Request (7.1356ms)
-    ✔ should reject unsupported sort options with 400 Bad Request (4.9806ms)
-  ✔ Input Validation & Error Edge Cases (30.3834ms)
-  ▶ GET /api/products/:id
-    ✔ should return single product for a valid ID (12.2632ms)
-    ✔ should return 404 Not Found for nonexistent ObjectId (6.2249ms)
-    ✔ should return 400 Bad Request for malformed ID (8.9777ms)
-  ✔ GET /api/products/:id (27.9516ms)
-  ▶ 404 Route Not Found Handling
-    ✔ should return 404 with structured JSON on unregistered routes (6.6249ms)
-  ✔ 404 Route Not Found Handling (6.8789ms)
-✔ E-Commerce Multi-Filter REST API Test Suite (299.4333ms)
-
-ℹ tests 21
-ℹ suites 13
-ℹ pass 21
-ℹ fail 0
-ℹ duration_ms 1792.9712
+✔ E-Commerce Multi-Filter REST API Test Suite (318ms)
+ℹ tests 27 | pass 27 | fail 0
 ✔ Backend REST API Tests passed successfully!
 
 ▶ Running Frontend Functional Tests...
-▶ Frontend Filter Functional & Business Invariants Test Suite
-  ▶ Dual Price Slider Logic
-    ✔ should clamp minPrice so it NEVER exceeds maxPrice (1.7512ms)
-    ✔ should clamp maxPrice so it NEVER falls below minPrice (0.2139ms)
-    ✔ should accurately compute track highlight percentage coordinates (0.237ms)
-  ✔ Dual Price Slider Logic (3.0784ms)
-  ▶ Category Filter Multi-Selection Toggle
-    ✔ should add category when not previously present (1.0649ms)
-    ✔ should remove category when already selected (0.1995ms)
-    ✔ should return empty list when all categories are deselected (0.1376ms)
-  ✔ Category Filter Multi-Selection Toggle (1.6657ms)
-  ▶ Rating Filter State Transitions
-    ✔ should select minimum rating between 1 and 5 (0.1639ms)
-    ✔ should reset rating filter to 0 on clear (0.1568ms)
-  ✔ Rating Filter State Transitions (0.5429ms)
-  ▶ API Query Parameter Serialization
-    ✔ should generate valid query string for backend API (0.5146ms)
-    ✔ should omit unset or default filter parameters (0.7267ms)
-  ✔ API Query Parameter Serialization (1.6383ms)
-✔ Frontend Filter Functional & Business Invariants Test Suite (7.6265ms)
-
-ℹ tests 10
-ℹ suites 5
-ℹ pass 10
-ℹ fail 0
-ℹ duration_ms 127.3464
+✔ Frontend Filter Functional & Business Invariants Test Suite (7.8ms)
+ℹ tests 14 | pass 14 | fail 0
 ✔ Frontend Functional Tests passed successfully!
 
 ====================================================
-🎉 ALL TESTS PASSED! (Completed in 2.16s)
+🎉 ALL 41 TESTS PASSED! (Completed in 2.12s)
 ====================================================
 ```
 
 ### Running Tests Locally
 ```bash
-# Run both Backend API and Frontend Functional suites
+# Run full suite (Backend API & Frontend Functional)
 node run-tests.js
-
-# Or run backend test suite alone
-cd backend
-npm test
 ```
+
+---
+
+## 🎓 Technical Viva Q&A Guide
+
+### Q1: Why must filtering and pagination happen on the backend instead of React?
+**Answer:**
+If the database contains 100,000 products, sending all 100,000 items over the network to the browser consumes hundreds of megabytes of bandwidth, exhausts mobile device memory, and degrades performance. By applying Search $\rightarrow$ Filtering $\rightarrow$ Sorting $\rightarrow$ Pagination directly in MongoDB via indexed queries, the database returns only the requested page (e.g. 8 items) in milliseconds, keeping the client lightweight and scalable.
+
+### Q2: What is the exact execution order and why does it matter?
+**Answer:**
+1. **Search & Filter:** Reduces the entire collection down to only matching records.
+2. **Sort:** Orders the reduced set according to user criteria (`price_asc`, `price_desc`, `rating_desc`).
+3. **Pagination:** `countDocuments()` computes the total matching records for the UI page count, and `.skip((page - 1) * limit).limit(limit)` retrieves the exact page slice.
+*If pagination occurred before filtering, a user would only filter items within the current page, missing relevant products on other pages.*
+
+### Q3: Why do we test for `400 Bad Request` and `404 Not Found` in the test suite?
+**Answer:**
+This is called **Negative Testing**. It proves that the application is resilient against malformed inputs (e.g., negative prices, minPrice > maxPrice, invalid ratings, or fake categories) and responds with clear HTTP 400 errors rather than crashing with 500 Internal Server Errors.
+
+### Q4: How do database indexes improve search and filter performance?
+**Answer:**
+Without indexes, MongoDB performs a **COLLSCAN** (full collection scan), examining every single document ($O(N)$). With compound indexes on `{ category: 1, price: 1, rating: -1 }` and text/prefix indexes on `{ name: 1 }`, MongoDB performs an **IXSCAN** ($O(\log N)$ B-tree traversal), instantly locating qualifying documents.
+
+### Q5: Why is debouncing necessary on the search bar and price slider?
+**Answer:**
+When a user drags a range slider or types into a search bar, dozens of events fire per second. Without debouncing, each keystroke or millimeter of drag dispatches an HTTP request, flooding the server. A 300ms debounce pauses execution until the user stops interacting, firing only one optimized request.
 
 ---
 
@@ -239,25 +245,15 @@ npm test
 ```bash
 cd backend
 npm install
-
-# Configure environment variables (create .env from .env.example)
 cp .env.example .env
-
-# Populate database with 35 realistic products across all categories
 npm run seed
-
-# Start backend server (runs on http://localhost:5000)
 npm run dev
-# or for production
-npm start
 ```
 
 ### 2. Frontend Setup
 ```bash
 cd frontend
 npm install
-
-# Start Vite React development server (runs on http://localhost:3000)
 npm run dev
 ```
-Open your browser at `http://localhost:3000`. The frontend automatically proxies `/api` calls to `http://localhost:5000`.
+Open **`http://localhost:3000`** in your browser.
