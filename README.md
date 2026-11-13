@@ -352,29 +352,6 @@ $ node run-tests.js
 ```
 
 ---
-
-## 🎓 Technical Viva Q&A Guide
-
-### Q1: Why must filtering and pagination happen on the backend instead of React?
-> **Answer:**  
-> Transferring a full catalog of 50,000+ items to the browser wastes user bandwidth, exhausts mobile memory, and makes the UI freeze. Delegating Search $\rightarrow$ Filtering $\rightarrow$ Sorting $\rightarrow$ Pagination to MongoDB via indexed B-tree queries ensures only the current page (e.g. 8 documents) is transferred over the wire in milliseconds.
-
-### Q2: Why is the execution order Search $\rightarrow$ Filter $\rightarrow$ Sort $\rightarrow$ Pagination?
-> **Answer:**  
-> Search and filtering determine the total candidate set. Sorting orders that candidate set. Pagination then slices out only the visible window (`.skip().limit()`). If pagination were applied before filtering, the user would only filter within the first 8 items rather than across the entire inventory.
-
-### Q3: How do database compound indexes optimize performance?
-> **Answer:**  
-> Without indexes, MongoDB executes a **COLLSCAN** (scanning all documents in $O(N)$ time). With the compound index `{ category: 1, price: 1, rating: -1 }`, MongoDB traverses a B-tree in $O(\log N)$ time (**IXSCAN**) to locate matching document record IDs directly.
-
-### Q4: Why is input sanitization critical for regex-based product search?
-> **Answer:**  
-> If users search for special characters like `Sony (WH`, raw unescaped strings passed into `new RegExp()` cause a regex parse error and can crash the Node.js event loop or introduce **Regular Expression Denial of Service (ReDoS)**. We sanitize queries using `search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`.
-
-### Q5: Why is debouncing required on the frontend?
-> **Answer:**  
-> Dragging a range slider or typing into an input fires dozens of input events every second. A 300ms debounce waits until the user pauses interaction before sending an Axios request, preventing server traffic spikes.
-
 ---
 
 ## 💻 Local Setup & Execution Guide
